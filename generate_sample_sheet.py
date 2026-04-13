@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Generate an original A4 answer sheet (questions 1–3) inspired by UK 11+ line-in-box
-layouts, with a machine-readable layout.json for the scanner.
+Generate an original GL-inspired A4 answer sheet (questions 1–3 + example).
+Horizontal block layout closely matches UK 11+ OMR style.
+Compatible with scan_mark_sheet.py.
 """
 
 from __future__ import annotations
@@ -18,234 +19,287 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas
 
-# Original styling: magenta/pink form ink (common on commercial OMR), black anchors.
-FORM_MAGENTA = colors.Color(0.78, 0.0, 0.46)
-ANCHOR_BLACK = colors.black
-TEXT_GREY = colors.Color(0.15, 0.15, 0.15)
+# ── Colours ──────────────────────────────────────────────────────────────────
+FORM_C = colors.Color(0.78, 0.0, 0.46)   # GL-style magenta/pink
+BLACK  = colors.black
+GREY   = colors.Color(0.12, 0.12, 0.12)  # near-black text
 
-# Registration frame (black) — scanner locks to this quadrilateral.
-REG_X0 = 9 * mm
-REG_Y0 = 11 * mm  # bottom edge of frame (PDF coords)
-REG_W = 192 * mm
-REG_H = 273 * mm
+# ── Registration frame (black border scanner locks onto) ──────────────────────
+REG_X0, REG_Y0 = 9 * mm, 11 * mm
+REG_W,  REG_H  = 192 * mm, 273 * mm   # right=201mm, top=284mm
+
+# ── Question block geometry ───────────────────────────────────────────────────
+BLOCK_W    = 44.5 * mm   # width of each question block
+BLOCK_GAP  = 3.5  * mm   # gap between blocks
+NUM_BLOCKS = 4            # EXAMPLE + Q1 + Q2 + Q3
+
+# Centre the 4 blocks inside the registration frame
+BLOCKS_X0 = REG_X0 + (REG_W - (NUM_BLOCKS * BLOCK_W + (NUM_BLOCKS - 1) * BLOCK_GAP)) / 2
+
+HDR_H    = 8.5 * mm   # question-number header strip height
+OPT_H    = 7.5 * mm   # height per option row
+NUM_OPTS = 5
+BLOCK_H  = HDR_H + NUM_OPTS * OPT_H   # ≈ 46 mm
+
+# Option box dimensions (inside each block row)
+BOX_X_OFFSET = 16.0 * mm                           # block-left to box-left
+BOX_W        = BLOCK_W - BOX_X_OFFSET - 2.0 * mm  # ≈ 26.5 mm
+BOX_H        = OPT_H - 2.0 * mm                   # ≈ 5.5 mm
+
+# Top edge of question-block row (PDF bottom-origin)
+BLOCKS_TOP_Y = 205 * mm
 
 
-def pdf_to_norm(x_pdf: float, y_pdf: float) -> tuple[float, float]:
-    """Top-left normalised coordinates inside registration frame."""
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _norm(x_pdf: float, y_pdf: float) -> tuple[float, float]:
+    """Normalised (0–1) coords inside registration frame; origin = top-left."""
     nx = (x_pdf - REG_X0) / REG_W
     ny = 1.0 - (y_pdf - REG_Y0) / REG_H
     return nx, ny
 
 
-def draw_timing_marks(c: canvas.Canvas) -> None:
-    """Thin black timing segments along side margins (alignment aid, not proprietary)."""
-    c.setStrokeColor(ANCHOR_BLACK)
-    c.setFillColor(ANCHOR_BLACK)
-    c.setLineWidth(0.6)
-    xs_left = 3.5 * mm
-    xs_right = 206.5 * mm
-    tick_w = 4.0 * mm
-    tick_h = 0.9 * mm
-    # a few ticks spanning header + question block
-    y_positions = [35, 55, 75, 95, 115, 135, 155, 175, 195, 215, 235, 255]
-    for y_mm in y_positions:
-        y = y_mm * mm
-        c.rect(xs_left, y, tick_w, tick_h, stroke=0, fill=1)
-        c.rect(xs_right - tick_w, y, tick_w, tick_h, stroke=0, fill=1)
+def _timing_marks(c: canvas.Canvas) -> None:
+    c.setFillColor(BLACK)
+    tw, th = 4.0 * mm, 0.9 * mm
+    xs_l, xs_r = 3.5 * mm, 206.5 * mm
+    for ym in [28, 48, 68, 88, 108, 128, 148, 168, 188, 208, 228, 248, 268]:
+        y = ym * mm
+        c.rect(xs_l, y, tw, th, stroke=0, fill=1)
+        c.rect(xs_r - tw, y, tw, th, stroke=0, fill=1)
 
 
-def draw_q_block_boxes(
-    c: canvas.Canvas,
-    q_index: int,
-    top_y_mm: float,
-    row_h_mm: float,
-    opt_labels: list[str],
-) -> list[dict]:
-    """
-    One question: labels in left column, answer boxes on the right (GL-style).
-    Returns mark metadata for layout.json.
-    """
-    marks: list[dict] = []
-    left_x = 22 * mm
-    label_col_w = 16 * mm
-    gap = 4 * mm
-    box_w = 22 * mm
-    box_h = 6.5 * mm
-    box_x0 = left_x + label_col_w + gap
-
-    q_top_pdf = top_y_mm * mm
-    block_h = row_h_mm * mm * len(opt_labels)
-
-    c.setStrokeColor(FORM_MAGENTA)
-    c.setLineWidth(0.9)
-    # outer question frame
-    c.rect(left_x - 4 * mm, q_top_pdf - block_h - 5 * mm, 170 * mm, block_h + 9 * mm)
-
-    c.setFont("Helvetica-Bold", 11)
-    c.setFillColor(TEXT_GREY)
-    label = "Example" if q_index == 0 else str(q_index)
-    c.drawString(left_x, q_top_pdf - 4 * mm, label)
-
-    c.setFont("Helvetica", 9.5)
-    row_pdf_h = row_h_mm * mm
-    for i, lab in enumerate(opt_labels):
-        y_top = q_top_pdf - (i + 1) * row_pdf_h
-        y_mid = y_top + row_pdf_h * 0.35
-        c.setFillColor(TEXT_GREY)
-        c.drawString(left_x + 1 * mm, y_mid, lab)
-        # answer rectangle (magenta border, white interior)
-        c.setStrokeColor(FORM_MAGENTA)
-        c.setLineWidth(0.7)
-        c.rect(box_x0, y_top + 0.7 * mm, box_w, box_h)
-
-        y_pdf_bot = y_top + 0.7 * mm
-        y_pdf_top = y_top + 0.7 * mm + box_h
-        nx0, ny_top = pdf_to_norm(box_x0, y_pdf_top)
-        nx1, ny_bot = pdf_to_norm(box_x0 + box_w, y_pdf_bot)
-        marks.append(
-            {
-                "question": q_index,
-                "option": lab,
-                "rect_norm": [min(nx0, nx1), min(ny_top, ny_bot), max(nx0, nx1), max(ny_top, ny_bot)],
-            }
-        )
-    return marks
-
-
-def attach_qr(c: canvas.Canvas, x: float, y: float, size: float) -> None:
-    qr = QrCodeWidget(
-        value="MOCK11 SAMPLE SHEET Q1-3",
-        barWidth=0.55 * mm,
-        barHeight=0.55 * mm,
-    )
-    b = qr.getBounds()
+def _qr(c: canvas.Canvas, x: float, y: float, size: float) -> None:
+    qr = QrCodeWidget(value="MOCK11+ SAMPLE Q1-3", barWidth=0.55 * mm, barHeight=0.55 * mm)
+    b  = qr.getBounds()
     bw, bh = b[2] - b[0], b[3] - b[1]
-    d = Drawing(size, size, transform=[size / bw, 0, 0, size / bh, -b[0] * size / bw, -b[1] * size / bh])
+    d = Drawing(size, size, transform=[size / bw, 0, 0, size / bh,
+                                        -b[0] * size / bw, -b[1] * size / bh])
     d.add(qr)
     renderPDF.draw(d, c, x, y)
 
 
-def attach_code128(c: canvas.Canvas, x: float, y: float, value: str, w: float, h: float) -> None:
-    bc = BarcodeCode128(
-        value=value,
-        humanReadable=1,
-        barWidth=0.22 * mm,
-        barHeight=7 * mm,
-        fontSize=6,
-    )
-    b = bc.getBounds()
+def _barcode(c: canvas.Canvas, x: float, y: float, val: str, w: float, h: float) -> None:
+    bc = BarcodeCode128(value=val, humanReadable=1,
+                        barWidth=0.22 * mm, barHeight=7 * mm, fontSize=6)
+    b  = bc.getBounds()
     bw, bh = max(b[2] - b[0], 0.1), max(b[3] - b[1], 0.1)
-    d = Drawing(w, h, transform=[w / bw, 0, 0, h / bh, -b[0] * w / bw, -b[1] * h / bh])
+    d = Drawing(w, h, transform=[w / bw, 0, 0, h / bh,
+                                   -b[0] * w / bw, -b[1] * h / bh])
     d.add(bc)
     renderPDF.draw(d, c, x, y)
 
 
+def _question_block(
+    c: canvas.Canvas,
+    bx: float,
+    btop: float,
+    q_index: int,
+    opt_labels: list[str],
+    dual: bool = False,
+) -> list[dict]:
+    """
+    Draw one question block.
+    bx = left edge, btop = top edge (PDF bottom-origin, in pt).
+    Returns mark metadata for layout.json.
+    """
+    marks: list[dict] = []
+
+    # Outer block border
+    c.setStrokeColor(FORM_C)
+    c.setLineWidth(0.85)
+    c.rect(bx, btop - BLOCK_H, BLOCK_W, BLOCK_H, stroke=1, fill=0)
+
+    # Divider below header
+    c.setLineWidth(0.55)
+    c.line(bx, btop - HDR_H, bx + BLOCK_W, btop - HDR_H)
+
+    # Question number / label
+    q_lbl = "EXAMPLE" if q_index == 0 else str(q_index)
+    if dual:
+        q_lbl += " \u2605"          # ★  (two-mark indicator)
+    c.setFont("Helvetica-Bold", 7.5 if q_index == 0 else 11)
+    c.setFillColor(GREY)
+    c.drawString(bx + 2 * mm, btop - HDR_H + 2.2 * mm, q_lbl)
+
+    # Option rows
+    c.setFont("Helvetica", 9)
+    for i, lbl in enumerate(opt_labels):
+        row_bot = btop - HDR_H - (i + 1) * OPT_H
+        row_mid = row_bot + OPT_H * 0.45
+
+        # Label text
+        c.setFillColor(GREY)
+        c.drawString(bx + 2.5 * mm, row_mid - 3.0, lbl)
+
+        # Mark rectangle
+        box_x = bx + BOX_X_OFFSET
+        box_y = row_bot + (OPT_H - BOX_H) / 2
+        c.setStrokeColor(FORM_C)
+        c.setLineWidth(0.7)
+        c.rect(box_x, box_y, BOX_W, BOX_H, stroke=1, fill=0)
+
+        # Normalised coords for scanner
+        nx0, ny_t = _norm(box_x, box_y + BOX_H)
+        nx1, ny_b = _norm(box_x + BOX_W, box_y)
+        marks.append({
+            "question": q_index,
+            "option":   lbl,
+            "rect_norm": [
+                min(nx0, nx1), min(ny_t, ny_b),
+                max(nx0, nx1), max(ny_t, ny_b),
+            ],
+        })
+    return marks
+
+
+def _example_mark(c: canvas.Canvas, mark: dict) -> None:
+    """Draw a pre-filled horizontal pencil line inside the given mark box."""
+    nx0, ny0, nx1, ny1 = mark["rect_norm"]
+    x0  = REG_X0 + nx0 * REG_W
+    x1  = REG_X0 + nx1 * REG_W
+    y_t = REG_Y0 + (1.0 - ny0) * REG_H
+    y_b = REG_Y0 + (1.0 - ny1) * REG_H
+    cy  = (y_t + y_b) / 2
+    c.setStrokeColor(BLACK)
+    c.setLineWidth(1.4)
+    c.line(x0 + 2.5 * mm, cy, x1 - 2.5 * mm, cy)
+
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+
 def main() -> None:
     out_dir = Path(__file__).resolve().parent / "output"
     out_dir.mkdir(parents=True, exist_ok=True)
-    pdf_path = out_dir / "sample_answer_sheet_q1_q3.pdf"
+    pdf_path    = out_dir / "sample_answer_sheet_q1_q3.pdf"
     layout_path = out_dir / "sample_answer_sheet_q1_q3_layout.json"
 
-    w_pt, h_pt = A4
+    W, H = A4   # 595.28 pt × 841.89 pt
     c = canvas.Canvas(str(pdf_path), pagesize=A4)
 
-    # Page tint: white
+    # White background
     c.setFillColor(colors.white)
-    c.rect(0, 0, w_pt, h_pt, stroke=0, fill=1)
+    c.rect(0, 0, W, H, stroke=0, fill=1)
 
-    draw_timing_marks(c)
+    _timing_marks(c)
 
-    # Registration quadrilateral (BLACK) — must be high-contrast for contour detection.
-    c.setStrokeColor(ANCHOR_BLACK)
+    # ── Registration frame ────────────────────────────────────────────────
+    c.setStrokeColor(BLACK)
     c.setLineWidth(2.6)
     c.rect(REG_X0, REG_Y0, REG_W, REG_H, stroke=1, fill=0)
 
-    # Title band
-    c.setStrokeColor(FORM_MAGENTA)
+    # ── Title ─────────────────────────────────────────────────────────────
+    c.setFont("Helvetica-Bold", 11.5)
+    c.setFillColor(FORM_C)
+    c.drawString(12 * mm, 280 * mm, "PRACTICE ANSWER SHEET \u2014 VERBAL REASONING 1")
+    c.setFont("Helvetica-Oblique", 7.5)
+    c.setFillColor(GREY)
+    c.drawString(12 * mm, 275.5 * mm,
+                 "Original design for in-centre mock exams. "
+                 "Not affiliated with GL Assessment or any awarding body.")
+    c.setStrokeColor(FORM_C)
     c.setLineWidth(1.0)
-    c.line(12 * mm, 278 * mm, 198 * mm, 278 * mm)
-    c.setFont("Helvetica-Bold", 13)
-    c.setFillColor(TEXT_GREY)
-    c.drawString(12 * mm, 281 * mm, "Practice answer sheet — verbal reasoning (sample: questions 1–3)")
-    c.setFont("Helvetica-Oblique", 8.5)
-    c.drawString(12 * mm, 273 * mm, "Original mock layout for in-centre use. Not affiliated with any awarding body.")
+    c.line(12 * mm, 274 * mm, 198 * mm, 274 * mm)
 
-    attach_qr(c, 12 * mm, 232 * mm, 26 * mm)
+    # ── QR code (top-right, clear of all text) ───────────────────────────
+    # Placed at top-right corner: x=178–196mm, y=263–281mm
+    _qr(c, 178 * mm, 263 * mm, 18 * mm)
 
-    # Pupil / school strip (magenta ruled)
-    c.setStrokeColor(FORM_MAGENTA)
+    # ── Pupil / School fields ─────────────────────────────────────────────
+    c.setFont("Helvetica", 7.5)
+    c.setFillColor(GREY)
+    c.setStrokeColor(FORM_C)
     c.setLineWidth(0.7)
-    y0 = 250 * mm
-    c.rect(12 * mm, y0 - 18 * mm, 120 * mm, 8 * mm)
-    c.rect(134 * mm, y0 - 18 * mm, 64 * mm, 8 * mm)
+
+    # Pupil Name box (spans most of header width)
+    c.drawString(12 * mm, 271.5 * mm, "Pupil's Name")
+    c.rect(12 * mm, 262.5 * mm, 120 * mm, 8 * mm, stroke=1, fill=0)
+
+    # School Name box (right of pupil name, left of QR)
+    c.drawString(136 * mm, 271.5 * mm, "School Name")
+    c.rect(136 * mm, 262.5 * mm, 38 * mm, 8 * mm, stroke=1, fill=0)
+
+    # Unique Pupil Number — 12 individual digit boxes
+    c.drawString(12 * mm, 259.5 * mm, "UNIQUE PUPIL NUMBER")
+    for k in range(12):
+        c.rect(12 * mm + k * 7.0 * mm, 252 * mm, 6.2 * mm, 6.5 * mm, stroke=1, fill=0)
+
+    # School Number — 6 digit boxes (right column)
+    c.drawString(100 * mm, 259.5 * mm, "SCHOOL NUMBER")
+    for k in range(6):
+        c.rect(130 * mm + k * 7.0 * mm, 252 * mm, 6.2 * mm, 6.5 * mm, stroke=1, fill=0)
+
+    # Date of test  DD / MM / YYYY (below UPN row)
+    c.drawString(12 * mm, 248.5 * mm, "DATE OF TEST")
+    field_x = 45 * mm
+    for lbl, cnt in [("DAY", 2), ("MONTH", 2), ("YEAR", 4)]:
+        c.drawString(field_x, 248.5 * mm, lbl)
+        for j in range(cnt):
+            c.rect(field_x + j * 7.0 * mm, 241 * mm, 6.2 * mm, 6.5 * mm, stroke=1, fill=0)
+        field_x += cnt * 7.0 * mm + 9 * mm
+
+    # Second DATE OF TEST block (right side — mirrors GL layout)
+    c.drawString(134 * mm, 248.5 * mm, "DATE OF TEST")
+    c.drawString(163 * mm, 248.5 * mm, "DAY")
+    c.drawString(176 * mm, 248.5 * mm, "MONTH")
+    c.drawString(191 * mm, 248.5 * mm, "YEAR")
+    for k in range(2):
+        c.rect(163 * mm + k * 6.7 * mm, 241 * mm, 6.0 * mm, 6.5 * mm, stroke=1, fill=0)
+    for k in range(2):
+        c.rect(177 * mm + k * 6.7 * mm, 241 * mm, 6.0 * mm, 6.5 * mm, stroke=1, fill=0)
+    for k in range(4):
+        c.rect(190 * mm + k * 4.2 * mm, 241 * mm, 3.8 * mm, 6.5 * mm, stroke=1, fill=0)
+
+    # ── Instructions ──────────────────────────────────────────────────────
+    c.setFont("Helvetica-Bold", 10.5)
+    c.setFillColor(GREY)
+    c.drawString(12 * mm, 233 * mm, "Please mark boxes with a thin horizontal line")
     c.setFont("Helvetica", 8.5)
-    c.setFillColor(TEXT_GREY)
-    c.drawString(13 * mm, y0 - 8.5 * mm, "Pupil surname and forename (print)")
-    c.drawString(135 * mm, y0 - 8.5 * mm, "Centre / class code")
+    c.drawString(12 * mm, 227 * mm,
+                 "Use a sharp HB or B pencil.  Mark ONE box per question "
+                 "(TWO boxes for Question 3\u2605).  Rub out errors completely.")
 
-    # Date boxes DD MM YYYY
-    c.drawString(12 * mm, y0 - 28 * mm, "Date of test (DD / MM / YYYY)")
-    bx = 62 * mm
-    for label, count in [("DD", 2), ("MM", 2), ("YY", 2)]:
-        c.drawString(bx, y0 - 28 * mm, label)
-        for j in range(count):
-            c.rect(bx + 14 * mm + j * 7.5 * mm, y0 - 30 * mm, 6.5 * mm, 7 * mm)
-        bx += 14 * mm + count * 7.5 * mm + 10 * mm
+    # ── Question blocks ───────────────────────────────────────────────────
+    opt_labels  = ["A", "B", "C", "D", "E"]
+    block_specs = [
+        (0, opt_labels, False),   # EXAMPLE
+        (1, opt_labels, False),   # Question 1
+        (2, opt_labels, False),   # Question 2
+        (3, opt_labels, True),    # Question 3 (dual-mark)
+    ]
 
-    # Instructions + example
-    c.setFont("Helvetica-Bold", 9.5)
-    c.drawString(12 * mm, 205 * mm, "How to mark your answers")
-    c.setFont("Helvetica", 9)
-    instr = (
-        "Use a sharp HB or B pencil. For each question draw a single neat horizontal line inside ONE box only, "
-        "unless the question tells you to mark TWO answers. Rub out errors fully. Do not fold or crease this sheet."
-    )
-    text_obj = c.beginText(12 * mm, 198 * mm)
-    text_obj.textLine(instr[:95])
-    text_obj.textLine(instr[95:])
-    c.drawText(text_obj)
-
-    c.setFont("Helvetica-Oblique", 8.5)
-    c.drawString(12 * mm, 184 * mm, "Example (correct style of mark):")
-    ex_labels = ["m", "f", "a", "l", "d"]
-    ex_marks = draw_q_block_boxes(c, 0, 182, 7.2, ex_labels)
-    # draw a synthetic horizontal mark in option "a" (third row) for illustration only
-    for m in ex_marks:
-        if m["option"] != "a":
-            continue
-        nx0, ny0, nx1, ny1 = m["rect_norm"]
-        x0 = REG_X0 + nx0 * REG_W
-        x1 = REG_X0 + nx1 * REG_W
-        y_pdf_top = REG_Y0 + (1.0 - ny0) * REG_H
-        y_pdf_bot = REG_Y0 + (1.0 - ny1) * REG_H
-        cy = (y_pdf_top + y_pdf_bot) / 2
-        c.setStrokeColor(ANCHOR_BLACK)
-        c.setLineWidth(1.1)
-        c.line(x0 + 2.5 * mm, cy, x1 - 2.5 * mm, cy)
-    c.setFont("Helvetica", 8)
-    c.setFillColor(TEXT_GREY)
-    c.drawString(12 * mm, 148 * mm, "Example row is not scored.")
-
-    # Questions 1–3 (A–E); question 3 requires two answers for demo of dual-mark logic.
     all_marks: list[dict] = []
-    all_marks += draw_q_block_boxes(c, 1, 136, 7.2, ["A", "B", "C", "D", "E"])
-    all_marks += draw_q_block_boxes(c, 2, 96, 7.2, ["A", "B", "C", "D", "E"])
-    all_marks += draw_q_block_boxes(c, 3, 56, 7.2, ["A", "B", "C", "D", "E"])
-    c.setFont("Helvetica-Bold", 9)
-    c.drawString(38 * mm, 64 * mm, "Question 3: mark TWO answers")
+    for idx, (qnum, opts, dual) in enumerate(block_specs):
+        bx = BLOCKS_X0 + idx * (BLOCK_W + BLOCK_GAP)
+        all_marks += _question_block(c, bx, BLOCKS_TOP_Y, qnum, opts, dual)
 
-    attach_code128(c, 12 * mm, 10 * mm, "MOCK11-SAMPLE-Q3", 72 * mm, 12 * mm)
+    # Pre-fill example mark in option "B" (shows pupils how to mark)
+    for m in all_marks:
+        if m["question"] == 0 and m["option"] == "B":
+            _example_mark(c, m)
+            break
+
+    # Note below blocks
+    c.setFont("Helvetica-Oblique", 7.5)
+    c.setFillColor(GREY)
+    c.drawString(BLOCKS_X0, BLOCKS_TOP_Y - BLOCK_H - 5 * mm,
+                 "\u2605 Question 3: mark exactly TWO answers.     "
+                 "EXAMPLE block is shown for reference — it is not scored.")
+
+    # ── Barcode + "PLEASE TURN OVER" ─────────────────────────────────────
+    _barcode(c, 12 * mm, 13 * mm, "MOCK11-SAMPLE-Q3", 72 * mm, 12 * mm)
     c.setFont("Helvetica-Bold", 9)
-    c.setFillColor(FORM_MAGENTA)
-    c.drawCentredString(105 * mm, 16 * mm, "PLEASE TURN OVER")
+    c.setFillColor(FORM_C)
+    c.drawCentredString(105 * mm, 16.5 * mm, "PLEASE TURN OVER")
 
     c.showPage()
     c.save()
 
+    # ── Layout JSON for scanner ───────────────────────────────────────────
     layout = {
         "version": 1,
         "title": "sample_answer_sheet_q1_q3",
-        "page_size_pt": [w_pt, h_pt],
+        "page_size_pt": list(A4),
         "registration": {
             "quad_pdf_mm_bl_origin": [
                 [REG_X0 / mm, REG_Y0 / mm],
@@ -253,19 +307,19 @@ def main() -> None:
                 [(REG_X0 + REG_W) / mm, (REG_Y0 + REG_H) / mm],
                 [REG_X0 / mm, (REG_Y0 + REG_H) / mm],
             ],
-            "note": "Quad order is BL, BR, TR, TL in PDF mm with origin bottom-left.",
+            "note": "Quad order BL, BR, TR, TL in PDF mm (bottom-left origin).",
         },
         "questions": [
             {"id": 1, "min_select": 1, "max_select": 1, "options": ["A", "B", "C", "D", "E"]},
             {"id": 2, "min_select": 1, "max_select": 1, "options": ["A", "B", "C", "D", "E"]},
             {"id": 3, "min_select": 2, "max_select": 2, "options": ["A", "B", "C", "D", "E"]},
         ],
-        "marks": [m for m in all_marks if m["question"] != 0],
+        "marks":         [m for m in all_marks if m["question"] != 0],
         "example_marks": [m for m in all_marks if m["question"] == 0],
     }
     layout_path.write_text(json.dumps(layout, indent=2), encoding="utf-8")
-    print(f"Wrote {pdf_path}")
-    print(f"Wrote {layout_path}")
+    print(f"PDF  \u2192 {pdf_path}")
+    print(f"JSON \u2192 {layout_path}")
 
 
 if __name__ == "__main__":

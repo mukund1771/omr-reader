@@ -207,6 +207,7 @@ _ref_sample_page0.png
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
+.claude
 
 # Marimo
 marimo/_static/
