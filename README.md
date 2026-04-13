@@ -1,20 +1,3 @@
-# Mock 11+ line-in-box answer sheet (sample)
-
-Original **A4** answer sheet for **questions 1–3** (GL-style: thin horizontal line in small rectangles, not bubble circles), plus a **Python + OpenCV** scanner that outputs **CSV**.
-
-This is a portfolio sample for an Upwork brief: it is **not** a reproduction of any official copyrighted form.
-
-## What you get
-
-| Item | Location |
-|------|----------|
-| Printable PDF | `output/sample_answer_sheet_q1_q3.pdf` |
-| Machine layout (ROIs + rules) | `output/sample_answer_sheet_q1_q3_layout.json` |
-| Generator | `generate_sample_sheet.py` |
-| Scanner | `scan_mark_sheet.py` |
-| Geometry / mark scoring | `geometry.py` |
-| Automated sanity checks | `synthetic_scan_test.py` → `test_results/` |
-
 ## Setup
 
 ```bash
@@ -25,9 +8,9 @@ pip install -r requirements.txt
 python generate_sample_sheet.py
 ```
 
-## Staff workflow (real scan)
+## workflow
 
-1. Print `output/sample_answer_sheet_q1_q3.pdf` on plain A4 (colour or greyscale is fine; magenta rules are optional visually).
+1. Print `sample.pdf` on plain A4 (colour or greyscale is fine; magenta rules are optional visually).
 2. Candidates mark with **HB/B pencil**: one neat **horizontal line** in the box (question 3 asks for **two** lines in two boxes).
 3. Scan or photograph the full page (whole black registration frame visible).
 4. Run:
