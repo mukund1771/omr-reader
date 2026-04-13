@@ -194,6 +194,13 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
+# Local reference assets
+_ref_sample_page0.png
+
+# Generated outputs (keep tracked if you prefer; ignored for cleaner PRs)
+# output/
+# test_results/
+
 # Cursor
 #  Cursor is an AI-powered code editor. `.cursorignore` specifies files/directories to
 #  exclude from AI features like autocomplete and code analysis. Recommended for sensitive data

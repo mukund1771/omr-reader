@@ -1,0 +1,3 @@
+clean: image=synthetic_clean.png csv=synthetic_clean.csv
+light_marks: image=synthetic_light_marks.png csv=synthetic_light_marks.csv
+ambiguous_q1: image=synthetic_ambiguous_q1.png csv=synthetic_ambiguous_q1.csv
