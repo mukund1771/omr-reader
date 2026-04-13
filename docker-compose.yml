@@ -1,0 +1,32 @@
+services:
+
+  # ── Generate answer sheet PDF + layout JSON ──────────────────────────────
+  generate:
+    build: .
+    command: python generate_sample_sheet.py
+    volumes:
+      - ./output:/app/output
+
+  # ── Run synthetic scan tests (3 cases, annotated PNGs + CSVs) ────────────
+  test:
+    build: .
+    command: python synthetic_scan_test.py
+    volumes:
+      - ./output:/app/output          # needs the layout JSON generated above
+      - ./test_results:/app/test_results
+
+  # ── Scan a real filled sheet ──────────────────────────────────────────────
+  # Usage:
+  #   docker compose run --rm scan \
+  #     --image /app/scans/myscan.png \
+  #     --layout /app/output/sample_answer_sheet_q1_q3_layout.json \
+  #     --key "1:B,2:A,3:BD" \
+  #     --student "Jane Smith" \
+  #     --out /app/output/result.csv \
+  #     --debug-warp /app/output/warp.png
+  scan:
+    build: .
+    entrypoint: python scan_mark_sheet.py
+    volumes:
+      - ./scans:/app/scans            # place input scan images here
+      - ./output:/app/output
